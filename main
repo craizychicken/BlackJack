@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+import numpy as np
+import sys
+import random
+import time
+import os
+
+def read_input(prompt=""):
+    """Prompt the user and read a line from standard input."""
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    return sys.stdin.readline().strip()
+
+def clear_screen():
+    """Clear the terminal screen (works on Windows, Linux, and macOS)."""
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+# Starting variables
+suits = {'♥': 'Hearts', '♦': 'Diamonds', '♣': 'Clubs', '♠': 'Spades'}
+ranks = np.array(["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"])
+cards_back = np.array([
+    "┌───────┐",
+    "|░░░░░░░|",
+    "|░░░░░░░|",
+    "|░░░░░░░|",
+    "|░░░░░░░|",
+    "|░░░░░░░|",
+    "└───────┘"
+])
+
+class Cards:
+    def __init__(self, rank, suit):
+        self.rank = rank
+        self.suit = suit
+        self.image = np.array([
+            "┌───────┐",    
+            f"| {self.rank:<2}    |", 
+            "|       |",    
+            f"|   {self.suit}   |",   
+            "|       |",    
+            f"|    {self.rank:>2} |",  
+            "└───────┘"
+        ])
+
+# The Deck (list of card objects)
+def deck_shuffle():
+    return [Cards(rank, suit) for rank in ranks for suit in suits]
+
+deck = deck_shuffle()
+
+class Dealer:
+    def __init__(self):
+        # Cards held by the dealer
+        self.deck = []
+        self.value = 0
+
+    def initialize(self):
+        for _ in range(2):
+            self.hit(self.deck)
+        return self.deck
+    
+    def show_cards(self, hand, hidden=False):
+        """
+        Displays the cards side by side.
+        If hidden is True and hand has 2 cards, the second card is replaced with a card-back design.
+        """
+        # Prepare the list of card images
+        if not hidden:
+            cards = [card.image for card in hand]
+        elif hidden and len(hand) == 2:
+            cards = [hand[0].image, cards_back]
+        else:
+            cards = [card.image for card in hand]
+
+        # Print cards line by line side by side
+        for i in range(len(cards[0])):
+            for j in range(len(cards)):
+                sys.stdout.write(cards[j][i] + " ")
+            sys.stdout.write("\n")
+
+    def hit(self, hand):
+        card = random.choice(deck)  # Randomly select a card from the global deck
+        hand.append(card)           # Add the card to the hand
+        deck.remove(card)           # Remove the card from the global deck
+        return hand
+    
+    def update_value(self, hand):
+        new_value = 0
+        num_of_aces = 0  # Count the aces to decide whether to count them as 1 or 11
+
+        for card in hand:
+            if card.rank == "A":
+                num_of_aces += 1
+            else:
+                try:
+                    new_value += int(card.rank)
+                except ValueError:
+                    new_value += 10  # J, Q, K count as 10
+        # Choose ace values that do not bust the hand if possible
+        for _ in range(num_of_aces):
+            new_value += 11 if new_value + 11 <= 21 else 1
+        return new_value
+
+class Player(Dealer):
+    def __init__(self):
+        # Cards held by the player
+        self.deck = []
+        self.value = 0
+
+    def split(self, hand):
+        if hand[0].rank != hand[1].rank or len(hand) > 2:
+            raise Exception("Cannot split this hand")
+        else:
+            return [hand[0]], [hand[1]]
+
+def UI(dealer, dealer_hand, dealer_hide, player, split_hands, bank, bet):
+    """Refresh the screen and display the current game state."""
+    clear_screen()  # Clear the screen before showing updated UI
+    print(f"Bank = {bank}\n")
+    print("Dealer's hand:")
+    dealer.show_cards(dealer_hand, dealer_hide)
+    if not dealer_hide:
+        print(f"Value: {dealer.update_value(dealer_hand)}\n")
+    print("Your hands:")
+    for j, p_hand in enumerate(split_hands):
+        print(f"Hand {j + 1}:")
+        player.show_cards(p_hand)
+        print(f"Value: {player.update_value(p_hand)}")
+        print(f"Bet = {bet[j]}\n")
+
+def main():
+    global deck  # Declare that we're modifying the global deck variable
+    # Accept deposit and initial bet via command-line arguments if provided.
+    if len(sys.argv) > 1:
+        try:
+            bank = int(sys.argv[1])
+        except ValueError:
+            sys.stdout.write("Error: Deposit must be an integer.\n")
+            sys.exit(1)
+    else:
+        bank = int(read_input("How much would you like to deposit? "))
+
+    if bank <= 0:
+        sys.stdout.write("Deposit must be a positive integer.\n")
+        sys.exit(1)
+
+    if len(sys.argv) > 2:
+        try:
+            initial_bet = int(sys.argv[2])
+        except ValueError:
+            sys.stdout.write("Error: Bet must be an integer.\n")
+            sys.exit(1)
+    else:
+        initial_bet = int(read_input("How much would you like to bet? "))
+
+    if initial_bet <= 0 or initial_bet > bank:
+        sys.stdout.write("Bet must be a positive integer and less than or equal to your deposit.\n")
+        sys.exit(1)
+
+    bet = [initial_bet]
+    while bank - bet[0] >= 0:
+        bank -= bet[0]
+        dealer = Dealer()
+        player = Player()
+        dealer_hide = True
+
+        # Set up dealer's and player's hands
+        dealer_hand = dealer.initialize()
+        player_hand = player.initialize()
+        player.value = player.update_value(player_hand)
+        split_hands = [player_hand]
+        bust = []
+
+        i = 0  # Hand counter for the player
+        while i < len(split_hands):
+            hand = split_hands[i]
+            while True:
+                UI(dealer, dealer_hand, dealer_hide, player, split_hands, bank, bet)
+                if player.update_value(hand) > 21:
+                    sys.stdout.write(f"Hand {i + 1} is bust!\n")
+                    dealer_hide = False
+                    bust.append(True)
+                    time.sleep(2)
+                    i += 1
+                    break
+                elif player.update_value(hand) == 21:
+                    sys.stdout.write(f"Hand {i + 1} hit blackjack!\n")
+                    dealer_hide = False
+                    bust.append(False)
+                    time.sleep(2)
+                    i += 1
+                    break
+
+                sys.stdout.write(f"Now playing hand number: {i + 1}.\n")
+                choice = int(read_input("Would you like to 1. Hit, 2. Double, 3. Split or 4. Stand:\n"))
+                if choice == 1:
+                    split_hands[i] = player.hit(hand)
+                elif choice == 2:
+                    if (bank - bet[i]) < 0:
+                        sys.stdout.write("Insufficient funds.\n")
+                    else:
+                        bank -= bet[i]
+                        split_hands[i] = player.hit(hand)
+                        bet[i] *= 2
+                        new_value = player.update_value(hand)
+                        sys.stdout.write(f"Hand {i + 1} doubles, now with value {new_value}.\n")
+                        UI(dealer, dealer_hand, dealer_hide, player, split_hands, bank, bet)
+                        time.sleep(2)
+                        bust.append(new_value > 21)
+                        i += 1
+                        dealer_hide = False
+                        break
+                elif choice == 3:
+                    if (bank - bet[i]) < 0:
+                        sys.stdout.write("Insufficient funds.\n")
+                    else:
+                        try:
+                            player_hand_1, player_hand_2 = player.split(hand)
+                            split_hands.remove(hand)
+                            split_hands.append(player_hand_1)
+                            split_hands.append(player_hand_2)
+                            bank -= bet[i]
+                            bet.append(bet[i])  # For a split, you must match the original bet on the new hand
+                            break
+                        except Exception as e:
+                            sys.stdout.write("Cannot split this hand: " + str(e) + "\n")
+                elif choice == 4:
+                    sys.stdout.write(f"Hand {i + 1} stands with value {player.update_value(hand)}.\n")
+                    dealer_hide = False
+                    bust.append(False)
+                    i += 1
+                    break
+                else:
+                    sys.stdout.write("Invalid choice.\n")
+                    continue
+
+        # Dealer’s turn
+        if all(bust):
+            sys.stdout.write("All hands lost.\n")
+        else:
+            UI(dealer, dealer_hand, dealer_hide, player, split_hands, bank, bet)
+            while dealer.update_value(dealer_hand) <= 16:
+                dealer.hit(dealer_hand)
+                UI(dealer, dealer_hand, dealer_hide, player, split_hands, bank, bet)
+                time.sleep(2)
+            dealer_bust = dealer.update_value(dealer_hand) > 21
+            for i, hand in enumerate(split_hands):
+                dealer_score = dealer.update_value(dealer_hand)
+                player_score = player.update_value(hand)
+                player_bust = bust[i]
+                if player_bust:
+                    sys.stdout.write(f"Hand {i + 1} lost.\n")
+                elif dealer_bust:
+                    sys.stdout.write(f"Hand {i + 1} won!\n")
+                    bank += (bet[i] * 2)
+                else:
+                    if dealer_score > player_score:
+                        sys.stdout.write(f"Hand {i + 1} lost.\n")
+                    elif dealer_score == player_score:
+                        sys.stdout.write(f"Hand {i + 1} is a draw.\n")
+                        bank += bet[i]
+                    else:
+                        sys.stdout.write(f"Hand {i + 1} won!\n")
+                        bank += (bet[i] * 2)
+        # Reinitialize the deck for the next hand.
+        deck = deck_shuffle()
+    
+        sys.stdout.write(f"Balance left: {bank}\n")
+        cont = read_input("Continue? (y/n): ")
+        if cont.lower() == "y":
+            bet = [int(read_input("How much would you like to bet? "))]
+            if bet[0] <= 0 or bet[0] > bank:
+                sys.stdout.write("Bet must be a positive integer and less than or equal to your current bank.\n")
+                sys.exit(1)
+        else:
+            sys.exit(0)
+
+if __name__ == "__main__":
+    main()
